@@ -49,10 +49,11 @@ sealed interface FlowState {
     data class Writing(val job: Job) : FlowState
     data class Locking(val job: Job) : FlowState
 
+    /** [ready] flips shortly after the write, once the user has had time to lift the tag. */
     data class AwaitVerifyTap(
         val job: Job,
         val written: WrittenTag,
-        val lifted: Boolean = false,
+        val ready: Boolean = false,
         val problem: Problem? = null,
     ) : FlowState
 

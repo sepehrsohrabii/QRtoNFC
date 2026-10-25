@@ -222,7 +222,7 @@ private fun heroKey(state: FlowState): HeroKey = when (state) {
     is FlowState.AwaitWriteTap -> HeroKey.TAP_WRITE
     is FlowState.Writing -> HeroKey.WRITING
     is FlowState.Locking -> HeroKey.LOCKING
-    is FlowState.AwaitVerifyTap -> if (state.lifted) HeroKey.TAP_VERIFY else HeroKey.LIFT
+    is FlowState.AwaitVerifyTap -> if (state.ready) HeroKey.TAP_VERIFY else HeroKey.LIFT
     is FlowState.Verifying -> HeroKey.VERIFYING
     is FlowState.Success -> HeroKey.SUCCESS
     is FlowState.Failed -> HeroKey.FAILED

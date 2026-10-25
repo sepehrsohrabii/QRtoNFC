@@ -11,8 +11,7 @@ import com.qrtonfc.flow.VerifyReport
 import com.qrtonfc.flow.WrittenTag
 
 sealed interface WriteResult {
-    /** [ndef] is still connected (when available) so we can watch for the tag being lifted. */
-    class Ok(val written: WrittenTag, val ndef: Ndef?) : WriteResult
+    class Ok(val written: WrittenTag) : WriteResult
     class Error(val problem: Problem) : WriteResult
 }
 
@@ -22,8 +21,9 @@ sealed interface VerifyResult {
 }
 
 /**
- * Blocking NFC I/O. Called from the reader-mode callback thread, which is not the main thread
- * and keeps the round trip as short as possible.
+ * Blocking NFC I/O, kept as short as possible. Every operation closes its connection before
+ * returning: holding a tag open, or polling it, can stop some NFC controllers from discovering
+ * the next tap.
  */
 object NfcOps {
 
@@ -32,23 +32,21 @@ object NfcOps {
         return try {
             if (ndef != null) writeNdef(tag, ndef, message, lock, onLocking) else formatAndWrite(tag, message, lock, onLocking)
         } catch (e: TagLostException) {
-            runCatching { ndef?.close() }
             WriteResult.Error(Problem(FailReason.TAG_LOST))
         } catch (e: Exception) {
-            runCatching { ndef?.close() }
             WriteResult.Error(Problem(FailReason.WRITE_ERROR, e.message))
+        } finally {
+            runCatching { ndef?.close() }
         }
     }
 
     private fun writeNdef(tag: Tag, ndef: Ndef, message: NdefMessage, lock: Boolean, onLocking: () -> Unit): WriteResult {
         ndef.connect()
         if (!ndef.isWritable) {
-            ndef.close()
             return WriteResult.Error(Problem(FailReason.TAG_READ_ONLY))
         }
         val size = message.byteArrayLength
         if (size > ndef.maxSize) {
-            ndef.close()
             return WriteResult.Error(Problem(FailReason.TOO_LARGE, "Needs $size B, this tag holds ${ndef.maxSize} B"))
         }
         ndef.writeNdefMessage(message)
@@ -56,16 +54,12 @@ object NfcOps {
         var lockApplied = false
         if (lock) {
             if (!ndef.canMakeReadOnly()) {
-                ndef.close()
                 return WriteResult.Error(Problem(FailReason.LOCK_UNSUPPORTED, "Data was written but the tag is still writable"))
             }
             onLocking()
             lockApplied = ndef.makeReadOnly()
         }
-        return WriteResult.Ok(
-            WrittenTag(tag.id ?: ByteArray(0), techName(ndef.type), ndef.maxSize, lock, lockApplied),
-            ndef,
-        )
+        return WriteResult.Ok(WrittenTag(tag.id ?: ByteArray(0), techName(ndef.type), ndef.maxSize, lock, lockApplied))
     }
 
     private fun formatAndWrite(tag: Tag, message: NdefMessage, lock: Boolean, onLocking: () -> Unit): WriteResult {
@@ -82,7 +76,7 @@ object NfcOps {
         } finally {
             runCatching { formatable.close() }
         }
-        return WriteResult.Ok(WrittenTag(tag.id ?: ByteArray(0), "NDEF (formatted)", 0, lock, lock), null)
+        return WriteResult.Ok(WrittenTag(tag.id ?: ByteArray(0), "NDEF (formatted)", 0, lock, lock))
     }
 
     fun verify(tag: Tag, expected: NdefMessage, written: WrittenTag): VerifyResult {
@@ -108,21 +102,6 @@ object NfcOps {
             VerifyResult.Error(Problem(FailReason.TAG_LOST))
         } catch (e: Exception) {
             VerifyResult.Error(Problem(FailReason.READ_ERROR, e.message))
-        } finally {
-            runCatching { ndef.close() }
-        }
-    }
-
-    /** Blocks until the tag behind [ndef] leaves the field, polling with a real read. */
-    fun awaitRemoval(ndef: Ndef, isCancelled: () -> Boolean) {
-        try {
-            while (!isCancelled()) {
-                if (!ndef.isConnected) ndef.connect()
-                ndef.ndefMessage
-                Thread.sleep(150)
-            }
-        } catch (_: Exception) {
-            // Any I/O failure means the tag is gone.
         } finally {
             runCatching { ndef.close() }
         }

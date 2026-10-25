@@ -2,7 +2,7 @@ package com.qrtonfc.flow
 
 import android.app.Application
 import android.nfc.Tag
-import android.nfc.tech.Ndef
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.qrtonfc.data.Settings
@@ -15,7 +15,6 @@ import com.qrtonfc.nfc.VerifyResult
 import com.qrtonfc.nfc.WriteResult
 import com.qrtonfc.scan.QrParser
 import com.qrtonfc.scan.QrPayload
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,7 +22,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Job as CoroutineJob
@@ -32,7 +30,7 @@ data class HistoryEntry(val payload: QrPayload, val report: VerifyReport, val at
 
 /**
  * The whole app is this state machine. Every transition is triggered by an event
- * (QR decoded, tag tapped, tag lifted, timer) so the user never has to press a button.
+ * (QR decoded, tag tapped, timer) so the user never has to press a button.
  */
 class FlowViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -49,11 +47,12 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
     val history: StateFlow<List<HistoryEntry>> = _history.asStateFlow()
 
     private val busy = AtomicBoolean(false)
-    private var watchJob: CoroutineJob? = null
     private var timerJob: CoroutineJob? = null
 
-    @Volatile
-    private var lifted = false
+    // The last tag we finished talking to. Restarting NFC discovery (e.g. on resume) makes
+    // Android report a tag that is still on the phone again; that is not a new tap.
+    @Volatile private var lastTagId: ByteArray? = null
+    @Volatile private var lastTagDoneAt = 0L
 
     /** Called by the camera analyzer with a stable QR value. */
     fun onQrDetected(raw: String) {
@@ -64,8 +63,9 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
         feedback.play(Cue.SCANNED)
     }
 
-    /** Called from the NFC reader-mode thread for every tag that enters the field. */
+    /** Called for every tag that enters the field, from reader mode or foreground dispatch. */
     fun onTag(tag: Tag) {
+        if (isRediscovery(tag)) return
         if (!busy.compareAndSet(false, true)) return
         try {
             when (val s = _state.value) {
@@ -75,8 +75,17 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
                 else -> Unit
             }
         } finally {
+            lastTagId = tag.id
+            lastTagDoneAt = SystemClock.elapsedRealtime()
             busy.set(false)
         }
+    }
+
+    private fun isRediscovery(tag: Tag): Boolean {
+        val id = tag.id ?: return false
+        val last = lastTagId ?: return false
+        return id.isNotEmpty() && id.contentEquals(last) &&
+            SystemClock.elapsedRealtime() - lastTagDoneAt < REDISCOVERY_WINDOW_MS
     }
 
     private fun write(tag: Tag, job: Job) {
@@ -86,37 +95,24 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
 
         when (val r = NfcOps.write(tag, job.message, lock) { _state.value = FlowState.Locking(job) }) {
             is WriteResult.Ok -> {
-                lifted = r.ndef == null
-                r.ndef?.let { watchRemoval(it) }
-                if (r.written.lockApplied) {
-                    feedback.play(Cue.LOCKED)
-                    _state.value = FlowState.Locking(job)
-                    // Let the padlock animation land before asking for the verify tap.
-                    timerJob = viewModelScope.launch {
-                        delay(750)
-                        _state.update { s ->
-                            if (s is FlowState.Locking) FlowState.AwaitVerifyTap(job, r.written, lifted) else s
-                        }
+                val locked = r.written.lockApplied
+                feedback.play(if (locked) Cue.LOCKED else Cue.WRITTEN)
+                if (locked) _state.value = FlowState.Locking(job)
+                else _state.value = FlowState.AwaitVerifyTap(job, r.written)
+                timerJob = viewModelScope.launch {
+                    if (locked) {
+                        // Let the padlock animation land before asking for the verify tap.
+                        delay(LOCK_SHOW_MS)
+                        _state.update { s -> if (s is FlowState.Locking) FlowState.AwaitVerifyTap(job, r.written) else s }
                     }
-                } else {
-                    feedback.play(Cue.WRITTEN)
-                    _state.value = FlowState.AwaitVerifyTap(job, r.written, lifted)
+                    delay(LIFT_HINT_MS)
+                    _state.update { s -> if (s is FlowState.AwaitVerifyTap && !s.ready) s.copy(ready = true) else s }
                 }
             }
             is WriteResult.Error -> {
                 feedback.play(Cue.ERROR)
                 _state.value = FlowState.AwaitWriteTap(job, r.problem)
             }
-        }
-    }
-
-    private fun watchRemoval(ndef: Ndef) {
-        watchJob = viewModelScope.launch(Dispatchers.IO) {
-            NfcOps.awaitRemoval(ndef) { !isActive }
-            if (!isActive) return@launch
-            lifted = true
-            feedback.play(Cue.LIFTED)
-            _state.update { s -> if (s is FlowState.AwaitVerifyTap) s.copy(lifted = true) else s }
         }
     }
 
@@ -143,7 +139,7 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
             }
             is VerifyResult.Error -> {
                 feedback.play(Cue.ERROR)
-                _state.value = s.copy(lifted = true, problem = r.problem)
+                _state.value = s.copy(ready = true, problem = r.problem)
             }
         }
     }
@@ -163,7 +159,6 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
     fun setRawText(enabled: Boolean) = viewModelScope.launch { store.setRawText(enabled) }
 
     private fun cancelJobs() {
-        watchJob?.cancel(); watchJob = null
         timerJob?.cancel(); timerJob = null
     }
 
@@ -174,5 +169,8 @@ class FlowViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val AUTO_LOOP_MS = 1800L
+        private const val LOCK_SHOW_MS = 750L
+        private const val LIFT_HINT_MS = 1200L
+        private const val REDISCOVERY_WINDOW_MS = 700L
     }
 }

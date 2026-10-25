@@ -134,7 +134,7 @@ private fun copyFor(state: FlowState): Copy = when (state) {
     is FlowState.Writing -> Copy("Writing…", "Keep holding the tag")
     is FlowState.Locking -> Copy("Locked", "The tag is now read-only")
     is FlowState.AwaitVerifyTap ->
-        if (state.lifted) Copy("Tap again to verify", "We'll read it back and compare")
+        if (state.ready) Copy("Tap again to verify", "We'll read it back and compare")
         else Copy("Written — lift the tag", "Then tap it once more to verify")
     is FlowState.Verifying -> Copy("Verifying…", "Comparing with the QR code")
     is FlowState.Success -> Copy("Perfect match", if (state.report.lockRequested) "Data verified · tag locked" else "Data verified")

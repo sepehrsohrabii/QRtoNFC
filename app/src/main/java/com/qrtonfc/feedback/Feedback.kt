@@ -12,7 +12,7 @@ import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.sin
 
-enum class Cue { SCANNED, WRITTEN, LOCKED, LIFTED, SUCCESS, ERROR }
+enum class Cue { SCANNED, WRITTEN, LOCKED, SUCCESS, ERROR }
 
 /**
  * Haptic + sound per step, so the whole flow can be done without looking at the screen.
@@ -34,7 +34,6 @@ class Feedback(context: Context) {
             Cue.SCANNED to track(tone(1320.0, 0.06)),
             Cue.WRITTEN to track(tone(880.0, 0.07) + tone(1175.0, 0.09)),
             Cue.LOCKED to track(tone(220.0, 0.05, decay = 40.0) + tone(330.0, 0.08, decay = 30.0)),
-            Cue.LIFTED to track(tone(990.0, 0.05)),
             Cue.SUCCESS to track(tone(1047.0, 0.08) + tone(1319.0, 0.08) + tone(1568.0, 0.18)),
             Cue.ERROR to track(tone(330.0, 0.1) + silence(0.04) + tone(262.0, 0.16)),
         )
@@ -63,7 +62,7 @@ class Feedback(context: Context) {
             composed(cue)
         } else {
             when (cue) {
-                Cue.SCANNED, Cue.LIFTED -> VibrationEffect.createOneShot(25, 180)
+                Cue.SCANNED -> VibrationEffect.createOneShot(25, 180)
                 Cue.WRITTEN -> VibrationEffect.createWaveform(longArrayOf(0, 30, 60, 30), intArrayOf(0, 200, 0, 200), -1)
                 Cue.LOCKED -> VibrationEffect.createOneShot(60, 255)
                 Cue.SUCCESS -> VibrationEffect.createWaveform(longArrayOf(0, 25, 50, 25, 50, 60), intArrayOf(0, 150, 0, 200, 0, 255), -1)
@@ -77,7 +76,6 @@ class Feedback(context: Context) {
         val c = VibrationEffect.startComposition()
         when (cue) {
             Cue.SCANNED -> c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.8f)
-            Cue.LIFTED -> c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_TICK, 0.7f)
             Cue.WRITTEN -> c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 0.6f)
                 .addPrimitive(VibrationEffect.Composition.PRIMITIVE_CLICK, 1f, 60)
             Cue.LOCKED -> c.addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, 1f)
