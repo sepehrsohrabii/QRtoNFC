@@ -17,13 +17,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.qrtonfc.flow.FlowState
 import com.qrtonfc.flow.FlowViewModel
+import com.qrtonfc.ui.App
+import com.qrtonfc.ui.NfcStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import com.qrtonfc.ui.App
-import com.qrtonfc.ui.NfcStatus
 
 class MainActivity : ComponentActivity() {
 
@@ -58,7 +58,8 @@ class MainActivity : ComponentActivity() {
                     .collectLatest { waitingForTags ->
                         if (waitingForTags) {
                             delay(CAMERA_RELEASE_MS)
-                            refreshNfc()
+                            // Never restart discovery while a tag is mid-write.
+                            if (viewModel.state.value is FlowState.AwaitWriteTap) refreshNfc()
                         }
                     }
             }
