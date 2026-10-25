@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- QR finder square -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M32,36h18v18h-18z M36,40v10h10v-10z" android:fillType="evenOdd" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M39,43h4v4h-4z" />
+    <path android:fillColor="#B3FFFFFF" android:pathData="M32,58h5v5h-5z M41,58h5v5h-5z M32,67h5v5h-5z M45,67h5v5h-5z M50,58h4v4h-4z" />
+    <!-- NFC waves -->
+    <path android:strokeColor="#FF67E8F9" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M60,46 A10,10 0 0,1 60,62" />
+    <path android:strokeColor="#FFA78BFA" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M66,40 A18,18 0 0,1 66,68" />
+    <path android:strokeColor="#FF6EE7B7" android:strokeWidth="4" android:strokeLineCap="round"
+        android:pathData="M72,34 A26,26 0 0,1 72,74" />
+</vector>
